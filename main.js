@@ -4,7 +4,9 @@ let spriteSheet;
 let sprites = {};
 
 var turn = true;
-
+function randint(min, max) {
+    return Math.floor(Math.random() * (max - min) ) + min;
+}
 
 function parseBool(bool){
     if(bool){
@@ -57,13 +59,13 @@ class Piece{
         if(this.type=="0"){return new Array(0)}
         var outpt = [];
         var pwnFactor = 1;
-        if(!forTeam){
+        if(!this.team){
             pwnFactor=-1;
         }
 
         switch(this.type){
             case "p": //pawn
-                if(this.turns==0&&board.content[bc(this.x)][bc(this.y-pwnFactor*2)].type=="0"){
+                if(this.turns==0&&board.content[bc(this.x)][bc(this.y-pwnFactor*2)].type=="0"&&board.content[bc(this.x)][bc(this.y-pwnFactor)].type=="0"){
                     outpt = [
                         [this.x,this.y-pwnFactor],
                         [this.x,this.y-pwnFactor*2]
@@ -74,10 +76,10 @@ class Piece{
                     }
                 }
 
-                if(board.content[bc(this.x-1)][bc(this.y-pwnFactor)].type!="0"){
+                if(board.content[bc(this.x-1)][bc(this.y-pwnFactor)].type!="0"&&board.content[bc(this.x-1)][bc(this.y-pwnFactor)].team!=this.team){
                     outpt.push([this.x-1,this.y-1]);
                 }
-                if(board.content[bc(this.x+1)][bc(this.y-pwnFactor)].type!="0"){
+                if(board.content[bc(this.x+1)][bc(this.y-pwnFactor)].type!="0"&&board.content[bc(this.x+1)][bc(this.y-pwnFactor)].team!=this.team){
                     outpt.push([this.x+1,this.y-pwnFactor]);
                 }
 
@@ -140,15 +142,16 @@ class Piece{
                 break;
             
             case "k": //knight
-                outpt.push([this.x-2,this.y-1]);
-                outpt.push([this.x+2,this.y-1]);
-                outpt.push([this.x-2,this.y+1]);
-                outpt.push([this.x+2,this.y+1]);
+                if(board.isValidMove(this.x-2,this.y-1,this.team))outpt.push([this.x-2,this.y-1]);
+                if(board.isValidMove(this.x+2,this.y-1,this.team))outpt.push([this.x+2,this.y-1]);
+                if(board.isValidMove(this.x-2,this.y+1,this.team))outpt.push([this.x-2,this.y+1]);
+                if(board.isValidMove(this.x+2,this.y+1,this.team))outpt.push([this.x+2,this.y+1]);
 
-                outpt.push([this.x-1,this.y-2]);
-                outpt.push([this.x+1,this.y-2]);
-                outpt.push([this.x-1,this.y+2]);
-                outpt.push([this.x+1,this.y+2]);
+                if(board.isValidMove(this.x-1,this.y-2,this.team))outpt.push([this.x-1,this.y-2]);
+                if(board.isValidMove(this.x+1,this.y-2,this.team))outpt.push([this.x+1,this.y-2]);
+                if(board.isValidMove(this.x-1,this.y+2,this.team))outpt.push([this.x-1,this.y+2]);
+                if(board.isValidMove(this.x+1,this.y+2,this.team))outpt.push([this.x+1,this.y+2]);
+
 
                 return outpt;
                 
@@ -216,7 +219,7 @@ class Piece{
             case "K": //king
                 for(var i = -1; i < 2;i++){
                     for(var j = -1; j < 2;j++){
-                        outpt.push([this.x+i,this.y+j]);
+                        if(board.isValidMove(this.x+i,this.y+j,this.team))outpt.push([this.x+i,this.y+j]);
                     }
                 }
                 return outpt;
@@ -358,17 +361,42 @@ class GameState{
         this.scoreFalse = 0;
         this.scoreTrue = 0;
         this.move = move;
-        for(var i = 0 ; i < b.content.length; i++){
-            for(var j = 0 ; j < b.content[i].length;j++){
+        this.board = b;
+        this.hasCheckmateFalse = false;
+        this.hasCheckmateTrue = false;
+        for(var i = 0 ; i < 8; i++){
+            for(var j = 0 ; j < 8;j++){
                 var p = b.content[i][j];
                 if(p.type=="0"){
                     continue;
-                }
-
-                if(p.team){
-                    this.scoreTrue += p.score;
                 }else{
-                    this.scoreFalse += p.score;
+
+                    if(p.team){
+                        this.scoreTrue += p.score;
+                    }else{
+                        this.scoreFalse += p.score;
+                    }
+
+
+                    var moves = p.getValidMovements();
+                    for(var opt = 0; opt < moves.length;opt++){
+                        var op=moves[opt];
+                        if(op[0]<0||op[0]>7||op[1]<0||op[1]>7){continue;}
+                        if(this.board.content[op[0]][op[1]].type=="K"){
+
+                            if(p.team){
+                                this.hasCheckmateFalse=true;
+                            }else{
+                                this.hasCheckmateTrue=true;
+                            }
+
+                        }
+
+                    }
+
+
+
+
                 }
 
             }
@@ -474,6 +502,14 @@ class Board{
         this.currentlyDisplayedMoves = [];
     }
 
+
+    makePlay(play){
+
+        this.currentPiece = this.content[play[0]][play[1]];
+        this.takeMove(play[2],play[3]);
+
+    }
+
     sendTo(x,y){
         if(x>8||y>8||x<0||y<0)return;
         x=Math.floor(x);
@@ -496,80 +532,73 @@ class Board{
     }
 
 
-    theorizeUserTurn(){
-        var futurePossibilities = [];
+    takeOwnTurn(team){
+        var futureStates = [];
+        var minFalseScore = 999999;
+        var minFalseMove = null;
+        var minTrueMove = null;
+        var minTrueScore = 999999;
+        
+        var FalseMoves = [];
+        var TrueMoves = [];
 
+        for(var i = 0 ; i < 8;i ++){
+            for(var j = 0 ; j < 8; j++){
+                console.log(futureStates);
+                var p = this.content[i][j];
 
-        var minAIScore = 10000000;
-        var minAIChoice = null;
+                if(p.team == team&&p.type!="0"){
 
-        for(var i = 0 ; i < 8;i++){
-            for(var j = 0 ; j < 8;j++){
-                
-                if(this.content[i][j].team==true){
-
-                    var tryPart = this.content[i][j];
-                    var options = tryPart.getValidMovements();
+                    var options = p.getValidMovements();
 
                     for(var opt = 0 ; opt < options.length;opt++){
 
-                        futurePossibilities.push(this.hypothesize(tryPart.x,tryPart.y,options[opt][0],options[opt][1],4));
-                        if(futurePossibilities[futurePossibilities.length-1].scoreFalse < minAIScore){
-                            minAIScore=futurePossibilities[futurePossibilities.length-1].scoreFalse;
-                            minAIChoice = futurePossibilities[futurePossibilities.length-1];
+                        futureStates.push(this.hypothesize(p.x,p.y,options[opt][0],options[opt][1]));
+                        var fstate = futureStates[futureStates.length-1];
+
+
+                        if((fstate.scoreTrue<minTrueScore || fstate.hasCheckmateTrue) && !fstate.hasCheckmateFalse){
+                            
+                            minTrueScore=fstate.scoreTrue;
+                            minTrueMove = fstate.move;
+                            TrueMoves.splice(0, TrueMoves.length);
+                            TrueMoves = [minTrueMove];
+                        
+                        }else if ((fstate.scoreTrue == minTrueScore || fstate.hasCheckmateTrue) && !fstate.hasCheckmateFalse){
+                            
+                            TrueMoves.push(fstate.move);
+                        
                         }
 
+                        if((fstate.scoreFalse<minFalseScore || fstate.hasCheckmateFalse) && !fstate.hasCheckmateTrue){
+                            
+                            minFalseScore=fstate.scoreFalse;
+                            minFalseMove = fstate.move;
+                            FalseMoves.splice(0, FalseMoves.length);
+                            console.log("NEW LOW");
+                            FalseMoves = [minFalseMove];
+
+                        }else if((fstate.scoreFalse == minFalseScore || fstate.hasCheckmateFalse) &&!fstate.hasCheckmateTrue){
+
+                            FalseMoves.push(fstate.move);
+
+                        }
+
+
+
                     }
-
-
-
                 }
 
             }
         }
 
-        this.currentPiece = this.content[minAIChoice.move[0]][minAIChoice.move[1]];
-
-        this.takeMove(minAIChoice.move[2],minAIChoice.move[3]);
-        return minAIChoice;
 
 
-    }
-
-    takeOwnTurn(layersDeep){
-        if(layersDeep > 5){
-            return null;
+        if(!team){
+            this.makePlay(TrueMoves[randint(0,TrueMoves.length-1)]);
+        }else{
+            this.makePlay(FalseMoves[randint(0,FalseMoves.length-1)]);
         }
-        var futurePossibilities = [];
-
-        var minAIScore = 10000000;
-        var minAIChoice = null;
-
-        for(var i = 0 ; i < 8;i++){
-            for(var j = 0 ; j < 8;j++){
-                
-                if(this.content[i][j].team==false&&this.content[i][j].type!="0"){
-
-                    var tryPart = this.content[i][j];
-                    var options = tryPart.getValidMovements(false);
-
-                    for(var opt = 0 ; opt < options.length;opt++){
-
-                        futurePossibilities.push(this.hypothesize(tryPart.x,tryPart.y,options[opt][0],options[opt][1], layersDeep));
-                        if(futurePossibilities[futurePossibilities.length-1].scoreTrue < minAIScore){
-                            minAIScore=futurePossibilities[futurePossibilities.length-1].scoreTrue;
-                            minAIChoice = futurePossibilities[futurePossibilities.length-1];
-                        }
-                    }
-
-                }
-
-            }
-        }
-
-        this.currentPiece = this.content[minAIChoice.move[0]][minAIChoice.move[1]];
-
-        this.takeMove(minAIChoice.move[2],minAIChoice.move[3]);
 
     }
 
@@ -589,25 +618,27 @@ class Board{
     }
 
 
-    hypothesize(sx,sy,nx,ny,ld){
-        
-        
+    hypothesize(sx,sy,nx,ny){
+        var badState = new GameState(this, [sx,sy,nx,ny]);
+        badState.scoreTrue = 9999999999;
+        badState.scoreTrue = 9999999999;
+        if(sx>8||sy>8||sx<0||sy<0||nx>8||ny>8||nx<0||ny<0)return badState;
+
+
+
         var hypoBoard = new Board();
         hypoBoard.content = this.getContents();
-        hypoBoard.currentPiece = hypoBoard.content[sx][sy];
-        hypoBoard.sendTo(nx,ny);
-        if(ld<4){
-            hypoBoard.theorizeUserTurn();
-        }
+        var scoreA = new GameState(hypoBoard, [sx,sy,nx,ny]);
+
+
+        hypoBoard.makePlay([sx,sy,nx,ny]);
+
+
         var score = new GameState(hypoBoard, [sx,sy,nx,ny]);
 
-
-
-        
-
+        console.log("DELTA: "+ scoreA.scoreTrue + "  -- > "  + score.scoreTrue);
 
         return score;
-
     }
 
 }
@@ -692,13 +723,18 @@ function draw(){
     }else{
         text("AI Calculating", 10*squareDimention,4*squareDimention);
     }
+    var current = new GameState(board, []);
+    text("SCORE FALSE: "+current.scoreFalse, 10*squareDimention, 5*squareDimention);
+    text("SCORE True: "+current.scoreTrue, 10*squareDimention, 6*squareDimention);
+    text("CHECKMATES: "+current.hasCheckmateTrue + " F:" + current.hasCheckmateFalse, 10*squareDimention,7*squareDimention);
+
 
     board.draw();
     if(!turn)
     {
 
         
-        board.takeOwnTurn(0);
+        board.takeOwnTurn(false);
         turn=!turn;
         
 
