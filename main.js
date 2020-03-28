@@ -2,6 +2,7 @@ let squareDimention = window.innerHeight / 8;
 let halfSquare = squareDimention/2;
 let spriteSheet;
 let sprites = {};
+var movesCalculated = 0;
 
 var turn = true;
 function randint(min, max) {
@@ -28,6 +29,7 @@ function bc(v){
 class Piece{
 
     constructor(x,y,type, team){
+        movesCalculated++;
         this.x=x;
         this.y=y;
         this.type=type;
@@ -55,14 +57,14 @@ class Piece{
 
     }
 
-    getValidMovements(forTeam){
+    getValidMovements(forTeam, forBoard){
         if(this.type=="0"){return new Array(0)}
         var outpt = [];
         var pwnFactor = 1;
         if(!this.team){
             pwnFactor=-1;
         }
-
+        var board = forBoard;
         switch(this.type){
             case "p": //pawn
                 if(this.turns==0&&board.content[bc(this.x)][bc(this.y-pwnFactor*2)].type=="0"&&board.content[bc(this.x)][bc(this.y-pwnFactor)].type=="0"){
@@ -378,7 +380,7 @@ class GameState{
                     }
 
 
-                    var moves = p.getValidMovements();
+                    var moves = p.getValidMovements(p.team, b);
                     for(var opt = 0; opt < moves.length;opt++){
                         var op=moves[opt];
                         if(op[0]<0||op[0]>7||op[1]<0||op[1]>7){continue;}
@@ -438,6 +440,8 @@ class Board{
         if(newx>7||newx<0||newy>7||newy<0)return false;
         if(this.content[newx][newy].type!="0"&&this.content[newx][newy].team==forTeam)return false;
 
+        
+
         return true;
 
     }
@@ -486,7 +490,7 @@ class Board{
     clickPiece(x,y){
         if(x>8||y>8||x<0||y<0)return;
         if(!this.content[Math.floor(x)][Math.floor(y)].team)return; //only white pieces are movable
-        this.currentlyDisplayedMoves = this.content[Math.floor(x)][Math.floor(y)].getValidMovements(true);
+        this.currentlyDisplayedMoves = this.content[Math.floor(x)][Math.floor(y)].getValidMovements(true, board);
         this.currentPiece=this.content[Math.floor(x)][Math.floor(y)];
     }
 
@@ -494,6 +498,7 @@ class Board{
         if(x>8||y>8||x<0||y<0)return;
         x=Math.floor(x);
         y=Math.floor(y);
+        if(this.content==undefined){return;}
         this.content[x][y] = this.currentPiece;
         this.content[this.currentPiece.x][this.currentPiece.y] = new Piece(this.currentPiece.x,this.currentPiece.y,"0",false);
         this.currentPiece.x=x;
@@ -544,41 +549,40 @@ class Board{
 
         for(var i = 0 ; i < 8;i ++){
             for(var j = 0 ; j < 8; j++){
-                console.log(futureStates);
                 var p = this.content[i][j];
 
                 if(p.team == team&&p.type!="0"){
 
-                    var options = p.getValidMovements();
+                    var options = p.getValidMovements(p.team, this);
 
                     for(var opt = 0 ; opt < options.length;opt++){
-
-                        futureStates.push(this.hypothesize(p.x,p.y,options[opt][0],options[opt][1]));
+                        var hypothesis = this.hypothesize(p.x,p.y,options[opt][0],options[opt][1]);
+                        if(hypothesis==undefined){continue;}
+                        futureStates.push(hypothesis);
                         var fstate = futureStates[futureStates.length-1];
+                        
 
-
-                        if((fstate.scoreTrue<minTrueScore || fstate.hasCheckmateTrue) && !fstate.hasCheckmateFalse){
+                        if((fstate.scoreTrue<minTrueScore) && !fstate.hasCheckmateTrue){
                             
                             minTrueScore=fstate.scoreTrue;
                             minTrueMove = fstate.move;
                             TrueMoves.splice(0, TrueMoves.length);
                             TrueMoves = [minTrueMove];
                         
-                        }else if ((fstate.scoreTrue == minTrueScore || fstate.hasCheckmateTrue) && !fstate.hasCheckmateFalse){
+                        }if ((fstate.scoreTrue == minTrueScore || fstate.hasCheckmateFalse) && !fstate.hasCheckmateTrue){
                             
                             TrueMoves.push(fstate.move);
                         
                         }
 
-                        if((fstate.scoreFalse<minFalseScore || fstate.hasCheckmateFalse) && !fstate.hasCheckmateTrue){
+                        if((fstate.scoreFalse<minFalseScore) && !fstate.hasCheckmateFalse){
                             
                             minFalseScore=fstate.scoreFalse;
                             minFalseMove = fstate.move;
                             FalseMoves.splice(0, FalseMoves.length);
-                            console.log("NEW LOW");
                             FalseMoves = [minFalseMove];
 
-                        }else if((fstate.scoreFalse == minFalseScore || fstate.hasCheckmateFalse) &&!fstate.hasCheckmateTrue){
+                        }if((fstate.scoreFalse == minFalseScore || fstate.hasCheckmateTrue) &&!fstate.hasCheckmateFalse){
 
                             FalseMoves.push(fstate.move);
 
@@ -591,8 +595,33 @@ class Board{
 
             }
         }
+        var moveset;
+        if(team){
+            return FalseMoves[randint(0,FalseMoves.length-1)];
+        }else{
+            moveset = TrueMoves;
+        }
+
+        for(var mv = 0; mv < moveset.length;mv++){
+
+            var hypoBoard = new Board();
+            hypoBoard.content = this.getContents();
+            try{
+                hypoBoard.makePlay(moveset[mv]);
+            }catch(error){
+                console.log(error);
+                continue;
+            }
+            var hypoPlayerMove = hypoBoard.takeOwnTurn(true);
+            hypoBoard.makePlay(hypoPlayerMove);
+            var score = new GameState(hypoBoard, moveset[mv]);
+
+            if(score.scoreTrue < new GameState(this, []).scoreTrue){
+                moveset.splice(mv,1);
+            }
 
 
+        }
 
         if(!team){
             this.makePlay(TrueMoves[randint(0,TrueMoves.length-1)]);
@@ -628,16 +657,15 @@ class Board{
 
         var hypoBoard = new Board();
         hypoBoard.content = this.getContents();
-        var scoreA = new GameState(hypoBoard, [sx,sy,nx,ny]);
 
-
-        hypoBoard.makePlay([sx,sy,nx,ny]);
-
+        try{
+            hypoBoard.makePlay([sx,sy,nx,ny]);
+        }catch(error){
+            console.log(error);
+            return;
+        }
 
         var score = new GameState(hypoBoard, [sx,sy,nx,ny]);
-
-        console.log("DELTA: "+ scoreA.scoreTrue + "  -- > "  + score.scoreTrue);
-
         return score;
     }
 
@@ -703,7 +731,6 @@ function setup(){
     sprites["p"]["false"] = spriteSheet.get(sdim*5,160,160,160);
     sprites["p"]["value"] = 1;
 
-    console.log(sprites);
 
 
 
@@ -712,7 +739,6 @@ function setup(){
 }
 
 let board;
-console.log(board);
 function draw(){
     background(0);
     //rotate(radians(90));
@@ -727,7 +753,7 @@ function draw(){
     text("SCORE FALSE: "+current.scoreFalse, 10*squareDimention, 5*squareDimention);
     text("SCORE True: "+current.scoreTrue, 10*squareDimention, 6*squareDimention);
     text("CHECKMATES: "+current.hasCheckmateTrue + " F:" + current.hasCheckmateFalse, 10*squareDimention,7*squareDimention);
-
+    text("Theoretical Pieces Created: "+movesCalculated,10*squareDimention,7.5*squareDimention);
 
     board.draw();
     if(!turn)
