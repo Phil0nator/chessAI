@@ -356,6 +356,9 @@ let standardSetup = [ [ 'r', 'p', '0', '0', '0', '0', 'p', 'r' ],
 [ 'b', 'p', '0', '0', '0', '0', 'p', 'b' ],
 [ 'k', 'p', '0', '0', '0', '0', 'p', 'k' ],
 [ 'r', 'p', '0', '0', '0', '0', 'p', 'r' ] ]
+
+var stackWatch = 0;
+
 class GameState{
 
     constructor(b, move){
@@ -388,8 +391,10 @@ class GameState{
 
                             if(p.team){
                                 this.hasCheckmateFalse=true;
+                                this.scoreTrue = 99999;
                             }else{
                                 this.hasCheckmateTrue=true;
+                                this.scoreFalse = 99999;
                             }
 
                         }
@@ -404,8 +409,27 @@ class GameState{
             }
         }
 
+        
 
 
+
+
+    }
+    advance(){
+        stackWatch++;
+        if(stackWatch>999){
+            return;
+        }
+        this.board.takeOwnTurn(true);
+        this.board.takeOwnTurn(false);
+        this.board.takeOwnTurn(true);
+        this.board.takeOwnTurn(false);
+
+        var newValues = new GameState(this.board, []);
+        this.scoreFalse = newValues.scoreFalse;
+        this.scoreTrue = newValues.scoreTrue;
+        this.hasCheckmateFalse = newValues.hasCheckmateFalse;
+        this.hasCheckmateTrue = newValues.hasCheckmateTrue;
 
 
     }
@@ -439,7 +463,7 @@ class Board{
 
         if(newx>7||newx<0||newy>7||newy<0)return false;
         if(this.content[newx][newy].type!="0"&&this.content[newx][newy].team==forTeam)return false;
-
+        
         
 
         return true;
@@ -509,7 +533,7 @@ class Board{
 
 
     makePlay(play){
-
+        if(play == undefined){return;}
         this.currentPiece = this.content[play[0]][play[1]];
         this.takeMove(play[2],play[3]);
 
@@ -556,11 +580,21 @@ class Board{
                     var options = p.getValidMovements(p.team, this);
 
                     for(var opt = 0 ; opt < options.length;opt++){
+
                         var hypothesis = this.hypothesize(p.x,p.y,options[opt][0],options[opt][1]);
+
                         if(hypothesis==undefined){continue;}
                         futureStates.push(hypothesis);
                         var fstate = futureStates[futureStates.length-1];
-                        
+
+                        try{
+                        fstate.advance();
+                        }
+                        catch(error){
+                            return;
+                        }
+
+
 
                         if((fstate.scoreTrue<minTrueScore) && !fstate.hasCheckmateTrue){
                             
@@ -596,33 +630,6 @@ class Board{
             }
         }
         var moveset;
-        if(team){
-            return FalseMoves[randint(0,FalseMoves.length-1)];
-        }else{
-            moveset = TrueMoves;
-        }
-
-        for(var mv = 0; mv < moveset.length;mv++){
-
-            var hypoBoard = new Board();
-            hypoBoard.content = this.getContents();
-            try{
-                hypoBoard.makePlay(moveset[mv]);
-            }catch(error){
-                console.log(error);
-                continue;
-            }
-            var hypoPlayerMove = hypoBoard.takeOwnTurn(true);
-            hypoBoard.makePlay(hypoPlayerMove);
-            var score = new GameState(hypoBoard, moveset[mv]);
-
-            if(score.scoreTrue < new GameState(this, []).scoreTrue){
-                moveset.splice(mv,1);
-            }
-
-
-        }
-
         if(!team){
             this.makePlay(TrueMoves[randint(0,TrueMoves.length-1)]);
         }else{
