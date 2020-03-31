@@ -2,8 +2,10 @@ let squareDimention = window.innerHeight / 8;
 let halfSquare = squareDimention/2;
 let spriteSheet;
 let sprites = {};
+let apha_beta_pFactor = 10; //Maximum number of "best choice" moves to calculate for each board of each genoration. Must be low to avoid running out of memory
+let maxGenerations = 4;
 var movesCalculated = 0;
-
+var hypoBoardCount = 0;
 var turn = true;
 function randint(min, max) {
     return Math.floor(Math.random() * (max - min) ) + min;
@@ -445,8 +447,9 @@ class Board{
         this.currentlyDisplayedMoves = [];
 
         
-
-
+        this.og = null;
+        this.ogMove = null;
+        hypoBoardCount++;
         
         for(var i = 0 ;i  < 8;i++){
             this.content.push(new Array(0));
@@ -562,15 +565,8 @@ class Board{
 
 
     takeOwnTurn(team){
-        var futureStates = [];
-        var minFalseScore = 999999;
-        var minFalseMove = null;
-        var minTrueMove = null;
-        var minTrueScore = 999999;
-        
-        var FalseMoves = [];
-        var TrueMoves = [];
-
+        var masterlist = [[]];
+        //INITIAL GENERATION
         for(var i = 0 ; i < 8;i ++){
             for(var j = 0 ; j < 8; j++){
                 var p = this.content[i][j];
@@ -581,60 +577,153 @@ class Board{
 
                     for(var opt = 0 ; opt < options.length;opt++){
 
-                        var hypothesis = this.hypothesize(p.x,p.y,options[opt][0],options[opt][1]);
-
-                        if(hypothesis==undefined){continue;}
-                        futureStates.push(hypothesis);
-                        var fstate = futureStates[futureStates.length-1];
-
-                        try{
-                        fstate.advance();
+                        var hypoBoard = this.getBoardFor(p.x,p.y,options[opt][0],options[opt][1]);  
+                        if(hypoBoard == undefined){
+                            continue;
                         }
-                        catch(error){
-                            return;
-                        }
-
-
-
-                        if((fstate.scoreTrue<minTrueScore) && !fstate.hasCheckmateTrue){
-                            
-                            minTrueScore=fstate.scoreTrue;
-                            minTrueMove = fstate.move;
-                            TrueMoves.splice(0, TrueMoves.length);
-                            TrueMoves = [minTrueMove];
-                        
-                        }if ((fstate.scoreTrue == minTrueScore || fstate.hasCheckmateFalse) && !fstate.hasCheckmateTrue){
-                            
-                            TrueMoves.push(fstate.move);
-                        
-                        }
-
-                        if((fstate.scoreFalse<minFalseScore) && !fstate.hasCheckmateFalse){
-                            
-                            minFalseScore=fstate.scoreFalse;
-                            minFalseMove = fstate.move;
-                            FalseMoves.splice(0, FalseMoves.length);
-                            FalseMoves = [minFalseMove];
-
-                        }if((fstate.scoreFalse == minFalseScore || fstate.hasCheckmateTrue) &&!fstate.hasCheckmateFalse){
-
-                            FalseMoves.push(fstate.move);
-
-                        }
-
-
+                        masterlist[0].push(hypoBoard);
 
                     }
+
                 }
 
             }
+
         }
-        var moveset;
-        if(!team){
-            this.makePlay(TrueMoves[randint(0,TrueMoves.length-1)]);
+
+
+        //Create all further possible game states: (computer memory can only hold so many)
+        var t = false;
+        for(var generation = 0; generation < maxGenerations; generation++){
+            t=!t;
+            masterlist.push([]);
+            for(var board = 0; board < masterlist[generation].length;board++){
+                
+                var currentBoard = masterlist[generation][board];
+                var currentBoardScore = new GameState(currentBoard, []);
+                
+                var currentBoardList = currentBoard.getFutureBoards(t);
+                for(var theo = 0; theo < currentBoardList.length; theo++){
+
+                    var currentBoardListScore = new GameState(currentBoardList[theo], []);
+                    //impliment light alpha-beta pruning
+                    if((currentBoardListScore.scoreTrue < currentBoardScore.scoreTrue && t)||(currentBoardListScore.scoreFalse < currentBoardScore.scoreFalse && !t)){
+                        continue;
+                    }
+
+                    masterlist[generation+1].push(currentBoardList[theo]);
+                }
+            }
+
+        }
+        var finalGeneration = masterlist[masterlist.length-1];
+        var minScore = 99999;
+        var minScoreSource = null;
+        var minScores=[];
+        //choose best future state
+        for(var i = 0; i < finalGeneration.length;i++){
+
+            var score = new GameState(finalGeneration[i], []);
+            if(score.scoreTrue < minScore && score.hasCheckmateFalse == false){
+                minScore = score.scoreTrue;
+                minScoreSource = score;
+                minScores=[minScoreSource];
+            }else if ((score.scoreTrue == minScore && score.hasCheckmateFalse == false)||(score.hasCheckmateTrue==true&&score.hasCheckmateFalse==false)){
+                minScores.push(score);
+            }
+
+        }
+
+        //find the origin of how to get to the best future state
+        this.makePlay(minScores[randint(0,minScores.length-1)].board.getOG().ogMove);
+        console.log(masterlist);
+        return;
+        
+
+    }
+
+
+    getOG(){
+
+        if(this.og == null){
+            return this;
         }else{
-            this.makePlay(FalseMoves[randint(0,FalseMoves.length-1)]);
+            return this.og.getOG();
         }
+
+    }
+
+    getFutureBoards(team){
+        var out = [];
+        var minScoreCuttoff = 0;
+        var worstPlayerMove = 0;
+        for(var i = 0 ; i < 8;i ++){
+            for(var j = 0 ; j < 8; j++){
+                var p = this.content[i][j];
+
+                if(p.team == team&&p.type!="0"){
+
+                    var options = p.getValidMovements(p.team, this);
+
+                    for(var opt = 0 ; opt < options.length;opt++){
+
+                        var hypoBoard = this.getBoardFor(p.x,p.y,options[opt][0],options[opt][1]);
+                        
+                        if(hypoBoard == undefined){
+                            continue;
+                        }
+                        hypoBoard.og = this;  
+
+                        if(true){ //alpha beta pruning to simulate real player choices
+                            if(out.length == apha_beta_pFactor){
+                                var worstScore = 0;
+                                for(var alpha = 0; alpha < apha_beta_pFactor; alpha++){
+                                    var hypoScore = new GameState(out[alpha],[]);
+                                    if((hypoScore.scoreFalse > minScoreCuttoff && team)|| (hypoBoard.scoreTrue > minScoreCuttoff && !team)){
+                                        if(team){
+                                            minScoreCuttoff=hypoScore.scoreTrue;
+                                        }else{
+                                            minScoreCuttoff=hypoScore.scoreFalse;
+                                        }
+
+                                    }
+
+
+                                    if((hypoScore.scoreFalse > worstScore&& team)||(hypoBoard.scoreTrue > worstScore && !team)){
+                                        if(team){
+                                            worstScore = hypoScore.scoreTrue;
+                                        }else{
+                                            worstScore = hypoScore.scoreFalse;
+                                        }
+                                        worstPlayerMove = alpha;
+                                    }
+
+                                }
+                            }else if(out.length>apha_beta_pFactor){
+
+                                var hypoScore = new GameState(hypoBoard, []);
+
+                                if(hypoScore < minScoreCuttoff){
+                                    out[worstPlayerMove] = hypoBoard;
+                                }else{
+                                    continue;
+                                }
+
+
+                            }else{
+                                out.push(hypoBoard);
+                            }
+
+                        }
+                    }
+                }
+            }
+        }
+
+        
+
+
+        return out;
 
     }
 
@@ -674,6 +763,21 @@ class Board{
 
         var score = new GameState(hypoBoard, [sx,sy,nx,ny]);
         return score;
+    }
+
+
+    getBoardFor(sx,sy,nx,ny){
+        var hypoBoard = new Board();
+        hypoBoard.content = this.getContents();
+        try{
+            hypoBoard.makePlay([sx,sy,nx,ny]);
+        }catch(error){
+            console.log(error);
+            return;
+        }
+        hypoBoard.ogMove = [sx,sy,nx,ny];
+        return hypoBoard;
+
     }
 
 }
@@ -746,6 +850,7 @@ function setup(){
 }
 
 let board;
+var justSwitched = false;
 function draw(){
     background(0);
     //rotate(radians(90));
@@ -759,16 +864,20 @@ function draw(){
     var current = new GameState(board, []);
     text("SCORE FALSE: "+current.scoreFalse, 10*squareDimention, 5*squareDimention);
     text("SCORE True: "+current.scoreTrue, 10*squareDimention, 6*squareDimention);
-    text("CHECKMATES: "+current.hasCheckmateTrue + " F:" + current.hasCheckmateFalse, 10*squareDimention,7*squareDimention);
+    text("Hypothetical Boards Theorized: "+hypoBoardCount, 10*squareDimention,7*squareDimention);
     text("Theoretical Pieces Created: "+movesCalculated,10*squareDimention,7.5*squareDimention);
 
     board.draw();
     if(!turn)
     {
-
+        if(!justSwitched){
+            justSwitched=true;
+            return;
+        }
         
         board.takeOwnTurn(false);
         turn=!turn;
+        justSwitched=false;
         
 
     }
